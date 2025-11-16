@@ -15,6 +15,25 @@ func (h *Hand) AddCard(c *Card) {
 	h.cards = append(h.cards, c)
 }
 
+func (h *Hand) CardCount() int {
+	return len(h.cards)
+}
+
+func (h *Hand) RemoveCard(rm *Card) {
+	idx := -1
+
+	for i := range h.cards {
+		if h.cards[i] == rm {
+			idx = i
+			break
+		}
+	}
+
+	if idx > -1 {
+		h.cards = slices.Delete(h.cards, idx, idx+1)
+	}
+}
+
 func (h *Hand) ContainsRank(rank int) bool {
 	for _, c := range h.cards {
 		if c.Rank == rank {
@@ -23,6 +42,22 @@ func (h *Hand) ContainsRank(rank int) bool {
 	}
 
 	return false
+}
+
+func (h *Hand) Display() {
+	fmt.Printf("%s\n", h.cards)
+}
+
+func (h *Hand) Pos(i int) *Card {
+	if i >= h.CardCount() {
+		return nil
+	}
+
+	if i < 0 {
+		return nil
+	}
+
+	return h.cards[i]
 }
 
 func (h *Hand) Sort() {
@@ -51,9 +86,45 @@ func (h *Hand) Sort() {
 	})
 }
 
-func (h Hand) Draw(screen *ebiten.Image, x, y float64) {
-	for _, c := range h.cards {
-		fmt.Printf("Draw card %d of %s at %v/%v\n", c.Rank, c.Suit.String(), x, y)
-		c.Draw(screen, x, y, 2.0)
+// PlayerPosition represents where a player is seated at the table
+type PlayerPosition int
+
+const (
+	PositionBottom PlayerPosition = iota
+	PositionLeft
+	PositionTop
+	PositionRight
+)
+
+// Draw renders all cards in the hand with proper spacing based on player position
+// All players now display cards horizontally
+// selectedIndices contains indices of selected cards, which will be offset upward
+func (h Hand) Draw(screen *ebiten.Image, x, y float64, position PlayerPosition, selectedIndices []int) {
+	const (
+		scale          = 2.0
+		cardWidth      = CardWidth * scale  // 48 * 2 = 96
+		cardHeight     = CardHeight * scale // 64 * 2 = 128
+		overlapFactor  = 0.3                // Cards overlap by 70%, showing 30%
+		horizOffset    = cardWidth * overlapFactor
+		selectedOffset = 20.0 // How many pixels to move selected card up
+	)
+
+	// Create a set for quick lookup of selected indices
+	selectedSet := make(map[int]bool)
+	for _, idx := range selectedIndices {
+		selectedSet[idx] = true
+	}
+
+	for i, c := range h.cards {
+		// All positions use horizontal layout
+		cardX := x + float64(i)*horizOffset
+		cardY := y
+
+		// If this card is selected, move it up
+		if selectedSet[i] {
+			cardY -= selectedOffset
+		}
+
+		c.Draw(screen, cardX, cardY, scale)
 	}
 }

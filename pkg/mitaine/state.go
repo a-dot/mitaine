@@ -1,6 +1,7 @@
 package mitaine
 
 import (
+	"fmt"
 	"log/slog"
 	"time"
 
@@ -30,14 +31,28 @@ const (
 func (s State) Update(game *Game) error {
 	switch s {
 	case Initial:
-		game.Players = NewPlayers()
+		game.Players = NewPlayers("Alice")
+
+		// Initialize Exchange button positioned above the bottom player's cards
+		const (
+			buttonWidth  = 100.0
+			buttonHeight = 30.0
+			cardHeight   = 64 * 2.0 // 128 pixels when scaled 2x
+			margin       = 10.0
+			buttonMargin = 10.0 // Space between button and cards
+			screenWidth  = 1024
+			screenHeight = 768
+		)
+		buttonX := (screenWidth - buttonWidth) / 2 // Center horizontally
+		buttonY := screenHeight - cardHeight - margin - buttonHeight - buttonMargin
+		game.ExchangeButton = NewButton(buttonX, buttonY, buttonWidth, buttonHeight, "Exchange")
 
 		game.State = NewGame
 
 	case NewGame:
 		game.ScoringState = Zero
 		game.Turn = 1
-		game.Active = 0
+		game.ActivePlayer = 0
 
 		slog.Debug("empty all the previous decks (discard, play)")
 		game.Play.Empty()
@@ -67,30 +82,63 @@ func (s State) Update(game *Game) error {
 			game.Players[i].hand.Sort()
 		}
 
+		game.WaitingForPlayerInput = true
 		game.State = ExchangeCards
 
 	case ExchangeCards:
-		//TODO
-		game.State = PlayerChoosesCard
+		if !game.WaitingForPlayerInput {
+			return nil
+		}
+
+		p := HumanPlayer(game.Players)
+
+		fmt.Printf("waiting for player input, %d cards selected\n", len(p.selectedIndices))
+
+		// wait for the click of the button
+
+		return nil
 
 	case PlayerChoosesCard:
-		activePlayer := &game.Players[game.Active%4]
+		activePlayer := &game.Players[game.ActivePlayer%4]
 
-		activePlayer.Think()
+		// For CPU players: wait 1 second before allowing them to play
+		if activePlayer.typ == CPU {
+			// If this is the first frame for this CPU player, start the timer
+			if game.WaitStart.IsZero() {
+				game.WaitStart = time.Now()
+				return nil
+			}
+
+			// Wait until 1 second has passed
+			if time.Since(game.WaitStart) < time.Second*1 {
+				return nil
+			}
+
+			// Reset timer for next player
+			game.WaitStart = time.Time{}
+		}
+
+		// For human players: check if they've selected a card
+		if activePlayer.typ == Human && len(activePlayer.selectedIndices) == 0 {
+			return nil
+		}
 
 		activePlayer.PlayCard()
 
-		if game.Turn == 2 && game.Active == 3 {
+		if game.Turn == 2 && ((game.ActivePlayer % 4) == 3) {
 			// TODO that's it
 			time.Sleep(1 * time.Second)
 
 			game.State = Scoring
 		}
 
-		game.Active++
+		game.ActivePlayer++
 
 	case Scoring:
-		//TODO
+		game.DealerIdx++
+		if game.DealerIdx == 4 {
+			game.DealerIdx = 0
+		}
 
 		game.State = NewGame
 	}

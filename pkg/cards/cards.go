@@ -2,6 +2,7 @@ package cards
 
 import (
 	"bytes"
+	"fmt"
 	"image"
 	"log"
 
@@ -75,6 +76,10 @@ func (s Suit) String() string {
 	}
 
 	return "Unknown"
+}
+
+func (c Card) String() string {
+	return fmt.Sprintf("%d of %s", c.Rank, c.Suit.String())
 }
 
 func (c Card) Color() Color {
