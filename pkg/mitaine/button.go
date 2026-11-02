@@ -9,11 +9,12 @@ import (
 )
 
 type Button struct {
-	x      float64
-	y      float64
-	width  float64
-	height float64
-	text   string
+	x       float64
+	y       float64
+	width   float64
+	height  float64
+	text    string
+	BgColor color.Color
 }
 
 func NewButton(x, y, width, height float64, label string) *Button {
@@ -35,11 +36,15 @@ func (b *Button) Contains(x, y int) bool {
 
 // Draw renders the button
 func (b *Button) Draw(screen *ebiten.Image) {
+	bgColor := b.BgColor
+	if bgColor == nil {
+		bgColor = color.RGBA{70, 130, 180, 255} // Steel blue
+	}
 	// Draw button background
 	vector.DrawFilledRect(screen,
 		float32(b.x), float32(b.y),
 		float32(b.width), float32(b.height),
-		color.RGBA{70, 130, 180, 255}, // Steel blue
+		bgColor,
 		false)
 
 	// Draw button border

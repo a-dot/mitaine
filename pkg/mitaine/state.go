@@ -1,11 +1,18 @@
 package mitaine
 
 import (
-	"fmt"
+	"image/color"
 	"log/slog"
+	"math/rand/v2"
 	"time"
 
 	"github.com/a-dot/mitaine/pkg/deck"
+)
+
+// Bounds of the random delay before a CPU player plays its card
+const (
+	cpuMinWait = 1500 * time.Millisecond
+	cpuMaxWait = 4 * time.Second
 )
 
 type State int
@@ -46,6 +53,11 @@ func (s State) Update(game *Game) error {
 		buttonX := (screenWidth - buttonWidth) / 2 // Center horizontally
 		buttonY := screenHeight - cardHeight - margin - buttonHeight - buttonMargin
 		game.ExchangeButton = NewButton(buttonX, buttonY, buttonWidth, buttonHeight, "Exchange")
+		game.ExchangeButton.BgColor = color.RGBA{46, 139, 87, 255}
+
+		// Play button sits in the same spot as the Exchange button, they are never shown together
+		game.PlayButton = NewButton(buttonX, buttonY, buttonWidth, buttonHeight, "Play")
+		game.PlayButton.BgColor = color.RGBA{178, 34, 34, 255}
 
 		game.State = NewGame
 
@@ -54,8 +66,14 @@ func (s State) Update(game *Game) error {
 		game.Turn = 1
 		game.ActivePlayer = 0
 
-		slog.Debug("empty all the previous decks (discard, play)")
-		game.Play.Empty()
+		slog.Debug("empty all the previous decks (discard, table) and points piles")
+		game.Table.Empty()
+		game.Discard.Empty()
+		game.PlayRequested = false
+
+		for i := range game.Players {
+			game.Players[i].points = nil
+		}
 
 		slog.Debug("shuffling a new deck for start of a new game")
 		game.Dealer = deck.Standard()
@@ -66,9 +84,11 @@ func (s State) Update(game *Game) error {
 
 	case DealCards:
 		var n int
-		if game.Turn == 1 {
+
+		switch game.Turn {
+		case 1:
 			n = 6
-		} else if game.Turn == 2 {
+		default:
 			n = 7
 		}
 
@@ -92,25 +112,27 @@ func (s State) Update(game *Game) error {
 
 		p := HumanPlayer(game.Players)
 
-		fmt.Printf("waiting for player input, %d cards selected\n", len(p.selectedIndices))
+		slog.Debug("waiting for player input", "selected", len(p.selectedIndices))
 
 		// wait for the click of the button
 
 		return nil
 
 	case PlayerChoosesCard:
-		activePlayer := &game.Players[game.ActivePlayer%4]
+		activePlayer := game.Active()
 
-		// For CPU players: wait 1 second before allowing them to play
+		// For CPU players: wait a random time before allowing them to play
 		if activePlayer.typ == CPU {
 			// If this is the first frame for this CPU player, start the timer
 			if game.WaitStart.IsZero() {
 				game.WaitStart = time.Now()
+				game.WaitDuration = cpuMinWait + time.Duration(rand.Float64()*float64(cpuMaxWait-cpuMinWait))
+				slog.Info("cpu waiting before playing", "player", activePlayer.name, "duration", game.WaitDuration)
 				return nil
 			}
 
-			// Wait until 1 second has passed
-			if time.Since(game.WaitStart) < time.Second*1 {
+			// Wait until the random delay has passed
+			if time.Since(game.WaitStart) < game.WaitDuration {
 				return nil
 			}
 
@@ -118,12 +140,14 @@ func (s State) Update(game *Game) error {
 			game.WaitStart = time.Time{}
 		}
 
-		// For human players: check if they've selected a card
-		if activePlayer.typ == Human && len(activePlayer.selectedIndices) == 0 {
+		// For human players: wait until they select a card and click Play
+		if activePlayer.typ == Human && !game.PlayRequested {
 			return nil
 		}
 
-		activePlayer.PlayCard()
+		game.PlayRequested = false
+
+		activePlayer.PlayCard(game)
 
 		if game.Turn == 2 && ((game.ActivePlayer % 4) == 3) {
 			// TODO that's it

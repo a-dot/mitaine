@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"image"
 	"log"
+	"log/slog"
 	"time"
 
 	"github.com/a-dot/mitaine/pkg/cards"
@@ -38,8 +39,9 @@ type Game struct {
 
 	ActivePlayer int // offset of the player who is active
 
-	Dealer deck.Deck
-	Play   deck.Deck
+	Dealer  deck.Deck
+	Table   Table     // cards played in the center of the table
+	Discard deck.Deck // cards that were swept off the table
 
 	DealerIdx int
 	Players   []Player
@@ -49,13 +51,64 @@ type Game struct {
 
 	WaitingForPlayerInput bool
 
-	WaitStart time.Time
+	WaitStart    time.Time
+	WaitDuration time.Duration // how long the active CPU player waits before playing
 
 	ExchangeButton *Button
+	PlayButton     *Button
+
+	// Set when the human clicked the Play button, consumed by the PlayerChoosesCard state
+	PlayRequested bool
 }
 
 func (g *Game) Layout(outsideWidth, outsideHeight int) (int, int) {
 	return ScreenWidth, ScreenHeight
+}
+
+// Active returns the player whose turn it is
+func (g *Game) Active() *Player {
+	return &g.Players[g.ActivePlayer%len(g.Players)]
+}
+
+// CanPlay reports whether the human is on turn with exactly one card selected
+func (g *Game) CanPlay() bool {
+	if g.State != PlayerChoosesCard {
+		return false
+	}
+
+	p := g.Active()
+
+	return p.typ == Human && len(p.selectedIndices) == 1
+}
+
+// PlayToTable applies the rules for player p playing card c on the table
+func (g *Game) PlayToTable(p *Player, c *cards.Card) {
+	prev := g.Table.Top()
+
+	switch {
+	case prev == nil:
+		// nothing on the table, the card just stays in the middle
+		g.Table.Place(c)
+
+	case prev.Rank == c.Rank && g.Table.Len() == 1:
+		// sweep: the played card goes face up in the player's points pile,
+		// the card it matched is scrapped
+		slog.Info("sweep: played card goes to the points pile, matched card is scrapped", "player", p.name, "played", c, "matched", prev)
+
+		g.Table.Take()
+		p.points = append(p.points, c)
+
+	case prev.Rank == c.Rank:
+		// same card on a pile of several: everything is discarded
+		slog.Info("clears the table", "player", p.name, "played", c, "matched", prev, "discarded", g.Table.Len()+1)
+
+		g.Discard.Cards = append(g.Discard.Cards, g.Table.Take()...)
+		g.Discard.Cards = append(g.Discard.Cards, c)
+
+	default:
+		// TODO handle the other conditions (e.g. higher/lower cards, face cards)
+		g.Table.Place(c)
+	}
 }
 
 // OnExchangeClick handles the Exchange button click event
@@ -78,7 +131,7 @@ func (g *Game) OnExchangeClick() {
 						// TODO should never happen
 					}
 
-					if j > 0 && c.Rank == p.hand.Pos(j+1).Rank {
+					if j < p.hand.CardCount()-1 && c.Rank == p.hand.Pos(j+1).Rank {
 						// we don't want to break a hand
 						continue
 					}
@@ -96,7 +149,7 @@ func (g *Game) OnExchangeClick() {
 						// TODO should never happen
 					}
 
-					if j < p.hand.CardCount()-1 && c.Rank == p.hand.Pos(j-1).Rank {
+					if j > 0 && c.Rank == p.hand.Pos(j-1).Rank {
 						// we don't want to break a hand
 						continue
 					}
@@ -106,7 +159,7 @@ func (g *Game) OnExchangeClick() {
 			}
 		}
 
-		fmt.Printf("player %d exchanges %s and %s\n", i, exchanges[i][0], exchanges[i][1])
+		slog.Info("exchanges cards", "player", p.name, "seat", i, "cards", exchanges[i])
 	}
 
 	// Player 0 exchanges with Player 2
@@ -161,6 +214,11 @@ func (g *Game) Update() error {
 			}
 		}
 
+		// Check if Play button was clicked (only when the human has selected a card)
+		if g.CanPlay() && g.PlayButton.Contains(mouseX, mouseY) {
+			g.PlayRequested = true
+		}
+
 		// Check if any human player clicked on their cards
 		for i := range g.Players {
 			if g.Players[i].HandleClick(g.State, mouseX, mouseY) {
@@ -195,8 +253,15 @@ func (g *Game) Draw(screen *ebiten.Image) {
 	// Draw centered
 	screen.DrawImage(imgTable, op)
 
+	g.Table.Draw(screen)
+
 	for _, p := range g.Players {
 		p.Draw(screen)
+	}
+
+	// Draw Play button when the human has selected a card to play
+	if g.CanPlay() {
+		g.PlayButton.Draw(screen)
 	}
 
 	// Draw Exchange button if in ExchangeCards state and 2+ cards selected

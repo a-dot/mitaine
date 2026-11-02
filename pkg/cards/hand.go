@@ -44,6 +44,19 @@ func (h *Hand) ContainsRank(rank int) bool {
 	return false
 }
 
+// CountRank returns how many cards of the given rank are in the hand
+func (h Hand) CountRank(rank int) int {
+	n := 0
+
+	for _, c := range h.cards {
+		if c.Rank == rank {
+			n++
+		}
+	}
+
+	return n
+}
+
 func (h *Hand) Display() {
 	fmt.Printf("%s\n", h.cards)
 }
